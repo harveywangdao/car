@@ -11,24 +11,24 @@ mysql -u root -p
 123456
 
 增加T-Box的数据库：
-create database tboxdb;
-use tboxdb;
+create database thingdb;
+use thingdb;
 
-CREATE TABLE `tboxfactorydata_tbl` (
+CREATE TABLE `thingfactorydata_tbl` (
     `id` INT NOT NULL AUTO_INCREMENT,
-    `tboxserialno` VARCHAR(29) NOT NULL,
-    `pretboxaes128key` VARCHAR(16) NOT NULL,
+    `thingserialno` VARCHAR(29) NOT NULL,
+    `prethingaes128key` VARCHAR(16) NOT NULL,
     `vin` VARCHAR(17) NOT NULL,
     `iccid` VARCHAR(20) NOT NULL,
     `imsi` VARCHAR(15) NOT NULL,
     `status` TINYINT NOT NULL,
     `bid` INT UNSIGNED NOT NULL,
-    `tboxaes128key` VARCHAR(16) NOT NULL,
+    `thingaes128key` VARCHAR(16) NOT NULL,
     `eventcreationtime` INT UNSIGNED NOT NULL,
     PRIMARY KEY(`id`)
 )ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
-INSERT INTO tboxfactorydata_tbl (tboxserialno,pretboxaes128key,vin,iccid,imsi,status,bid,tboxaes128key,eventcreationtime) VALUES (
+INSERT INTO thingfactorydata_tbl (thingserialno,prethingaes128key,vin,iccid,imsi,status,bid,thingaes128key,eventcreationtime) VALUES (
     "12345678901234567890123456789",
     "1234567890123456",
     "WDDUX52684DFR4582",
@@ -45,21 +45,21 @@ INSERT INTO tboxfactorydata_tbl (tboxserialno,pretboxaes128key,vin,iccid,imsi,st
 create database iovdb;
 use iovdb;
 
-CREATE TABLE `tboxbaseinfo_tbl` (
+CREATE TABLE `thingbaseinfo_tbl` (
     `id` INT NOT NULL AUTO_INCREMENT,
-    `tboxserialno` VARCHAR(29) NOT NULL,
-    `pretboxaes128key` VARCHAR(16) NOT NULL,
+    `thingserialno` VARCHAR(29) NOT NULL,
+    `prethingaes128key` VARCHAR(16) NOT NULL,
     `vin` VARCHAR(17) NOT NULL,
     `iccid` VARCHAR(20) NOT NULL,
     `imsi` VARCHAR(15) NOT NULL,
     `status` TINYINT NOT NULL,
     `bid` INT UNSIGNED NOT NULL,
-    `tboxaes128key` VARCHAR(16) NOT NULL,
+    `thingaes128key` VARCHAR(16) NOT NULL,
     `eventcreationtime` INT UNSIGNED NOT NULL,
     PRIMARY KEY(`id`)
 )ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
-INSERT INTO tboxbaseinfo_tbl (tboxserialno,pretboxaes128key,vin,iccid,imsi,status,bid,tboxaes128key,eventcreationtime) VALUES (
+INSERT INTO thingbaseinfo_tbl (thingserialno,prethingaes128key,vin,iccid,imsi,status,bid,thingaes128key,eventcreationtime) VALUES (
     "12345678901234567890123456789",
     "1234567890123456",
     "WDDUX52684DFR4582",
@@ -99,12 +99,12 @@ CREATE TABLE `VehicleStatusInfor_tbl` (
     `SteeringAngularSpeed` INT NOT NULL,
     `SteeringAngle` INT NOT NULL,
 
-    `tbox_id` INT NOT NULL,
+    `thing_id` INT NOT NULL,
 
     PRIMARY KEY(`id`)
 )ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
-ALTER TABLE VehicleStatusInfor_tbl ADD CONSTRAINT VehicleStatusInfor_FK_ID FOREIGN KEY(tbox_id) REFERENCES tboxbaseinfo_tbl(id);
+ALTER TABLE VehicleStatusInfor_tbl ADD CONSTRAINT VehicleStatusInfor_FK_ID FOREIGN KEY(thing_id) REFERENCES thingbaseinfo_tbl(id);
 
 
 CREATE TABLE `EngineStatusInfor_tbl` (
@@ -116,12 +116,12 @@ CREATE TABLE `EngineStatusInfor_tbl` (
     `EngState` TINYINT NOT NULL,
     `GearLevPos` TINYINT NOT NULL,
 
-    `tbox_id` INT NOT NULL,
+    `thing_id` INT NOT NULL,
 
     PRIMARY KEY(`id`)
 )ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
-ALTER TABLE EngineStatusInfor_tbl ADD CONSTRAINT EngineStatusInfor_FK_ID FOREIGN KEY(tbox_id) REFERENCES tboxbaseinfo_tbl(id);
+ALTER TABLE EngineStatusInfor_tbl ADD CONSTRAINT EngineStatusInfor_FK_ID FOREIGN KEY(thing_id) REFERENCES thingbaseinfo_tbl(id);
 
 CREATE TABLE `VehicleGpsInfor_tbl` (
     `id` INT NOT NULL AUTO_INCREMENT,
@@ -134,12 +134,12 @@ CREATE TABLE `VehicleGpsInfor_tbl` (
     `Accuracy` DOUBLE NOT NULL,
     `Time` BIGINT  NOT NULL,
 
-    `tbox_id` INT NOT NULL,
+    `thing_id` INT NOT NULL,
 
     PRIMARY KEY(`id`)
 )ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
-ALTER TABLE VehicleGpsInfor_tbl ADD CONSTRAINT VehicleGpsInfor_FK_ID FOREIGN KEY(tbox_id) REFERENCES tboxbaseinfo_tbl(id);
+ALTER TABLE VehicleGpsInfor_tbl ADD CONSTRAINT VehicleGpsInfor_FK_ID FOREIGN KEY(thing_id) REFERENCES thingbaseinfo_tbl(id);
 
 
 
@@ -188,13 +188,91 @@ bin\windows\kafka-console-consumer.bat --zookeeper localhost:2181 --topic Gatewa
 
 
 bin\windows\kafka-console-consumer.bat --zookeeper localhost:2181 --topic FinanceLeaseLockCarToGateway
-
-6.iov
-  cd E:\golang\src\hcxy\iov\iov_server
-  监听1235端口
-
-7.iov_client
-  cd E:\golang\src\hcxy\iov\iov_client
-  TSP监听1236端口
-  tbox当前连接1235端口
   
+
+Ubuntu上部署：
+github.com/harveywangdao/road/
+go get github.com/Shopify/sarama
+go get github.com/bsm/sarama-cluster
+go get github.com/garyburd/redigo/redis
+go get github.com/go-sql-driver/mysql
+go get github.com/jinzhu/gorm
+go get gopkg.in/mgo.v2
+
+一、安装配置必要的组件
+  MySQL、Redis、MongoDB、Zookeeper、Kafka
+
+二、执行
+1.MySQL
+1.1 启动MySQL
+
+mysql -u root -p 
+123456
+
+增加设备的数据库：
+create database thingsdb;
+use thingsdb;
+
+CREATE TABLE `thingbaseinfodata_tbl` (
+    `id` INT NOT NULL AUTO_INCREMENT,
+    `thingserialno` VARCHAR(29) NOT NULL,
+    `prethingaes128key` VARCHAR(16) NOT NULL,
+    `thingid` VARCHAR(17) NOT NULL,
+    `iccid` VARCHAR(20) NOT NULL,
+    `imsi` VARCHAR(15) NOT NULL,
+    `status` TINYINT NOT NULL,
+    `bid` INT UNSIGNED NOT NULL,
+    `thingaes128key` VARCHAR(16) NOT NULL,
+    `eventcreationtime` INT UNSIGNED NOT NULL,
+    PRIMARY KEY(`id`)
+)ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+INSERT INTO thingbaseinfodata_tbl (thingserialno,prethingaes128key,thingid,iccid,imsi,status,bid,thingaes128key,eventcreationtime) VALUES (
+    "12345678901234567890123456789",
+    "1234567890123456",
+    "WDDUX52684DFR4582",
+    "12345678901234567890",
+    "HGTSN12584UHGTE",
+    0,
+    0,
+    "1234567890123456",
+    0);
+
+
+
+增加iot后台的数据库：
+create database iotdb;
+use iotdb;
+
+CREATE TABLE `thingbaseinfodata_tbl` (
+    `id` INT NOT NULL AUTO_INCREMENT,
+    `thingserialno` VARCHAR(29) NOT NULL,
+    `prethingaes128key` VARCHAR(16) NOT NULL,
+    `thingid` VARCHAR(17) NOT NULL,
+    `iccid` VARCHAR(20) NOT NULL,
+    `imsi` VARCHAR(15) NOT NULL,
+    `status` TINYINT NOT NULL,
+    `bid` INT UNSIGNED NOT NULL,
+    `thingaes128key` VARCHAR(16) NOT NULL,
+    `eventcreationtime` INT UNSIGNED NOT NULL,
+    PRIMARY KEY(`id`)
+)ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+INSERT INTO thingbaseinfodata_tbl (thingserialno,prethingaes128key,thingid,iccid,imsi,status,bid,thingaes128key,eventcreationtime) VALUES (
+    "12345678901234567890123456789",
+    "1234567890123456",
+    "WDDUX52684DFR4582",
+    "12345678901234567890",
+    "HGTSN12584UHGTE",
+    0,
+    0,
+    "1234567890123456",
+    0);
+
+6.iot
+  cd golang/src/github.com/harveywangdao/road/iot
+  监听 6023 端口
+
+7.iot_client
+  cd golang/src/github.com/harveywangdao/road/iot_client
+  thing当前连接 127.0.0.1:6023 端口

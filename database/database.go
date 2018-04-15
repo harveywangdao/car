@@ -4,14 +4,14 @@ import (
 	"database/sql"
 	"errors"
 	_ "github.com/go-sql-driver/mysql"
-	"hcxy/iov/log/logger"
+	"github.com/harveywangdao/road/log/logger"
 	"sync"
 )
 
 const (
 	DBHostIP   = "127.0.0.1:3306" //IP地址
 	DBUsername = "root"           //用户名
-	DBPassword = "123456"         //密码
+	DBPassword = "180498"         //密码
 	DriverName = "mysql"
 )
 

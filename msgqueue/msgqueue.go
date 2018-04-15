@@ -1,8 +1,8 @@
 package msgqueue
 
 import (
-	"hcxy/iov/log/logger"
-	"hcxy/iov/msgqueue/kafka"
+	"github.com/harveywangdao/road/log/logger"
+	"github.com/harveywangdao/road/msgqueue/kafka"
 	"sync"
 )
 

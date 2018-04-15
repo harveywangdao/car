@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
-	"hcxy/log/log"
-	"hcxy/log/logger"
+	"github.com/harveywangdao/road/log/log"
+	"github.com/harveywangdao/road/log/logger"
 	//"log"
 	//"os"
 )

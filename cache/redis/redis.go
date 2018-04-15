@@ -2,7 +2,7 @@ package redis
 
 import (
 	"github.com/garyburd/redigo/redis"
-	"hcxy/iov/log/logger"
+	"github.com/harveywangdao/road/log/logger"
 	"sync"
 	"time"
 )
