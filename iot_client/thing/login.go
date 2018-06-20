@@ -1,6 +1,7 @@
 package thing
 
 import (
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,7 +14,8 @@ import (
 )
 
 const (
-	TimeoutTime = 1 * time.Second
+	TimeoutTime    = 10 * time.Second
+	LoginAgainTime = 10 * time.Second
 
 	LoginResultCodeSuccess       = 0x00
 	LoginResultCodeSnVinErr      = 0xA8
@@ -41,7 +43,8 @@ type Login struct {
 	loginChallServData *LoginChallengeServData
 	loginRespServData  *LoginResponseServData
 
-	loginStatus int
+	loginStatus         int
+	loginEventCreatTime uint32
 }
 
 type LoginReqServData struct {
@@ -165,25 +168,13 @@ func (login *Login) checkAesKeyOutOfDate(thingNo int) bool {
 	return false
 }
 
-func (login *Login) LoginRequest(thing *Thing) error {
-	if login.loginStatus != LoginStop {
-		logger.Error("Login already start!")
-		return errors.New("Login already start!")
-	}
-
-	if thing.ThingStatus == ThingUnRegister {
-		logger.Error("Thing UnRegister!")
-		return errors.New("Thing UnRegister!")
-	}
-
-	login.loginStatus = LoginRequestStatus
-
+func (login *Login) loginRequestSendData(thing *Thing) error {
 	msg := message.Message{
 		Connection: thing.Conn,
 	}
 
 	//Service data
-	thingDB, err := database.GetDB(DBName)
+	db, err := database.GetDB(DBName)
 	if err != nil {
 		logger.Error(err)
 		return err
@@ -191,7 +182,7 @@ func (login *Login) LoginRequest(thing *Thing) error {
 
 	var thingserialno, thingid string
 	var bid uint32
-	err = thingDB.QueryRow("SELECT thingserialno,thingid,bid FROM thingbaseinfodata_tbl WHERE id = ?", thing.ThingNo).Scan(
+	err = db.QueryRow("SELECT thingserialno,thingid,bid FROM thingbaseinfodata_tbl WHERE id = ?", thing.ThingNo).Scan(
 		&thingserialno,
 		&thingid,
 		&bid)
@@ -253,6 +244,8 @@ func (login *Login) LoginRequest(thing *Thing) error {
 		return err
 	}
 
+	login.loginEventCreatTime = dd.EventCreationTime
+
 	//Message header
 	mh := message.MessageHeader{
 		FixHeader:        message.MessageHeaderID,
@@ -271,6 +264,39 @@ func (login *Login) LoginRequest(thing *Thing) error {
 	err = msg.SendMessage(messageHeaderData, dispatchData, encryptServData)
 	if err != nil {
 		logger.Error(err)
+		return err
+	}
+
+	return nil
+}
+
+func (login *Login) LoginRequest(thing *Thing) error {
+	if login.loginStatus != LoginStop {
+		logger.Error("Login already start!")
+		return errors.New("Login already start!")
+	}
+
+	if thing.ThingStatus == ThingUnRegister {
+		logger.Error("Thing UnRegister!")
+		return errors.New("Thing UnRegister!")
+	}
+
+	login.loginStatus = LoginRequestStatus
+
+	err := login.loginRequestSendData(thing)
+	if err != nil {
+		t := time.NewTimer(LoginAgainTime)
+
+		go func() {
+			select {
+			case <-t.C:
+				logger.Info("Login fail, Login again!")
+				thing.PushEventChannel(EventLoginRequest, nil)
+			}
+		}()
+
+		login.loginStatus = LoginStop
+
 		return err
 	}
 
@@ -305,61 +331,71 @@ func (login *Login) LoginChallenge(thing *Thing, challengeMsg *message.Message) 
 		return errors.New("Need LoginRequest!")
 	}
 
+	if login.loginEventCreatTime != challengeMsg.DisPatch.EventCreationTime {
+		logger.Error("Package out of date!")
+		return errors.New("Package out of date!")
+	}
+
 	login.loginStatus = LoginChallengeStatus
 
 	login.timeoutTimer.Stop()
 
+	var prethingaes128key, thingaes128key, localThingRandomMd5, key string
+	var db *sql.DB
+	var err error
+
 	if challengeMsg.DisPatch.Result != LoginResultCodeSuccess {
-		logger.Info("Close timer")
-		login.closeTimeoutTimer <- true
-		thing.PushEventChannel(RegisterReqEventMessage, nil)
-		login.loginStatus = LoginStop
-		return nil
+		logger.Debug("Result error!")
+		goto FAILURE
 	}
 
 	login.loginChallServData = &LoginChallengeServData{}
-	err := json.Unmarshal(challengeMsg.ServData, login.loginChallServData)
+	err = json.Unmarshal(challengeMsg.ServData, login.loginChallServData)
 	if err != nil {
 		logger.Error(err)
-		return err
+		goto FAILURE
 	}
 
 	logger.Debug("login.loginChallServData =", string(challengeMsg.ServData))
 
-	thingDB, err := database.GetDB(DBName)
+	db, err = database.GetDB(DBName)
 	if err != nil {
 		logger.Error(err)
-		return err
+		goto FAILURE
 	}
 
-	var prethingaes128key, thingaes128key string
-	err = thingDB.QueryRow("SELECT prethingaes128key,thingaes128key FROM thingbaseinfodata_tbl WHERE id = ?", thing.ThingNo).Scan(
+	err = db.QueryRow("SELECT prethingaes128key,thingaes128key FROM thingbaseinfodata_tbl WHERE id = ?", thing.ThingNo).Scan(
 		&prethingaes128key,
 		&thingaes128key)
 	if err != nil {
 		logger.Error(err)
-		return err
+		goto FAILURE
 	}
 
-	var key string
 	if login.loginReqServData.KeyType == KeyTypePreAesKey {
 		key = prethingaes128key
 	} else {
 		key = thingaes128key
 	}
 
-	localThingRandomMd5 := login.genMd5Abstract16Bytes(login.loginReqServData.ThingRandom + key + login.loginChallServData.PlatRandom)
+	localThingRandomMd5 = login.genMd5Abstract16Bytes(login.loginReqServData.ThingRandom + key + login.loginChallServData.PlatRandom)
 
 	if login.loginChallServData.ThingRandomMd5 != localThingRandomMd5 {
-		logger.Info("Close timer")
-		login.closeTimeoutTimer <- true
-		thing.PushEventChannel(RegisterReqEventMessage, nil)
-		login.loginStatus = LoginStop
+		logger.Error("RandomMd5 error!")
+		goto FAILURE
 	} else {
 		thing.PushEventChannel(EventLoginResponse, challengeMsg)
 	}
 
 	return nil
+
+FAILURE:
+	logger.Debug("Close timer")
+	login.closeTimeoutTimer <- true
+	thing.PushEventChannel(RegisterReqEventMessage, nil)
+	login.loginStatus = LoginStop
+
+	return err
 }
 
 func (login *Login) LoginResponse(thing *Thing, challengeMsg *message.Message) error {
@@ -375,22 +411,25 @@ func (login *Login) LoginResponse(thing *Thing, challengeMsg *message.Message) e
 	}
 
 	//Service data
-	thingDB, err := database.GetDB(DBName)
+	var prethingaes128key, thingaes128key, key string
+	var serviceData, encryptServData, dispatchData, messageHeaderData []byte
+	var dd message.DispatchData
+	var mh message.MessageHeader
+
+	db, err := database.GetDB(DBName)
 	if err != nil {
 		logger.Error(err)
-		return err
+		goto FAILURE
 	}
 
-	var prethingaes128key, thingaes128key string
-	err = thingDB.QueryRow("SELECT prethingaes128key,thingaes128key FROM thingbaseinfodata_tbl WHERE id = ?", thing.ThingNo).Scan(
+	err = db.QueryRow("SELECT prethingaes128key,thingaes128key FROM thingbaseinfodata_tbl WHERE id = ?", thing.ThingNo).Scan(
 		&prethingaes128key,
 		&thingaes128key)
 	if err != nil {
 		logger.Error(err)
-		return err
+		goto FAILURE
 	}
 
-	var key string
 	if login.loginReqServData.KeyType == KeyTypePreAesKey {
 		key = prethingaes128key
 	} else {
@@ -402,10 +441,10 @@ func (login *Login) LoginResponse(thing *Thing, challengeMsg *message.Message) e
 		AccessKey: login.genMd5Abstract16Bytes(login.loginChallServData.PlatRandom + key),
 	}
 
-	serviceData, err := json.Marshal(login.loginRespServData)
+	serviceData, err = json.Marshal(login.loginRespServData)
 	if err != nil {
 		logger.Error(err)
-		return err
+		goto FAILURE
 	}
 
 	logger.Debug("serviceData =", serviceData)
@@ -417,14 +456,14 @@ func (login *Login) LoginResponse(thing *Thing, challengeMsg *message.Message) e
 			return err
 		}*/
 
-	encryptServData, err := msg.EncryptServiceData(message.Encrypt_AES128, key, serviceData)
+	encryptServData, err = msg.EncryptServiceData(message.Encrypt_AES128, key, serviceData)
 	if err != nil {
 		logger.Error(err)
-		return err
+		goto FAILURE
 	}
 
 	//Dispatch data
-	dd := message.DispatchData{
+	dd = message.DispatchData{
 		EventCreationTime:    challengeMsg.DisPatch.EventCreationTime,
 		Aid:                  0x2,
 		Mid:                  0x3,
@@ -435,14 +474,14 @@ func (login *Login) LoginResponse(thing *Thing, challengeMsg *message.Message) e
 		DispatchCreationTime: uint32(time.Now().Unix()),
 	}
 
-	dispatchData, err := util.StructToByteSlice(dd)
+	dispatchData, err = util.StructToByteSlice(dd)
 	if err != nil {
 		logger.Error(err)
-		return err
+		goto FAILURE
 	}
 
 	//Message header
-	mh := message.MessageHeader{
+	mh = message.MessageHeader{
 		FixHeader:        message.MessageHeaderID,
 		ServiceDataCheck: util.DataXOR(serviceData),
 		ServiceVersion:   0x0, //not sure
@@ -450,22 +489,40 @@ func (login *Login) LoginResponse(thing *Thing, challengeMsg *message.Message) e
 		MessageFlag:      0x0,
 	}
 
-	messageHeaderData, err := util.StructToByteSlice(mh)
+	messageHeaderData, err = util.StructToByteSlice(mh)
 	if err != nil {
 		logger.Error(err)
-		return err
+		goto FAILURE
 	}
 
 	err = msg.SendMessage(messageHeaderData, dispatchData, encryptServData)
 	if err != nil {
 		logger.Error(err)
-		return err
+		goto FAILURE
 	}
 
 	logger.Debug("Send LoginResponse success......")
 
 	login.timeoutTimer.Reset(TimeoutTime)
 	return nil
+
+FAILURE:
+	logger.Debug("Close timer")
+	login.closeTimeoutTimer <- true
+
+	t := time.NewTimer(LoginAgainTime)
+
+	go func() {
+		select {
+		case <-t.C:
+			logger.Info("Login fail, Login again!")
+			thing.PushEventChannel(EventLoginRequest, nil)
+		}
+	}()
+
+	login.loginStatus = LoginStop
+
+	return err
 }
 
 func (login *Login) LoginFailure(thing *Thing, failMsg *message.Message) error {
@@ -474,8 +531,13 @@ func (login *Login) LoginFailure(thing *Thing, failMsg *message.Message) error {
 		return errors.New("Need LoginResponse!")
 	}
 
+	if login.loginEventCreatTime != failMsg.DisPatch.EventCreationTime {
+		logger.Error("Package out of date!")
+		return errors.New("Package out of date!")
+	}
+
 	login.timeoutTimer.Stop()
-	logger.Info("Close timer")
+	logger.Debug("Close timer")
 	login.closeTimeoutTimer <- true
 
 	if failMsg.DisPatch.Result == LoginResultCodeInterrupt {
@@ -497,13 +559,21 @@ func (login *Login) LoginSuccess(thing *Thing, successMsg *message.Message) erro
 		return errors.New("Need LoginResponse!")
 	}
 
+	if login.loginEventCreatTime != successMsg.DisPatch.EventCreationTime {
+		logger.Error("Package out of date!")
+		return errors.New("Package out of date!")
+	}
+
 	login.timeoutTimer.Stop()
+	logger.Debug("Close timer")
 	login.closeTimeoutTimer <- true
 
 	loginSuccessServData := &LoginSuccessServData{}
 	err := json.Unmarshal(successMsg.ServData, loginSuccessServData)
 	if err != nil {
 		logger.Error(err)
+		login.loginStatus = LoginStop
+		thing.PushEventChannel(EventLoginRequest, nil)
 		return err
 	}
 
@@ -512,12 +582,14 @@ func (login *Login) LoginSuccess(thing *Thing, successMsg *message.Message) erro
 	err = login.saveNewAesKey(loginSuccessServData.AesRandom, successMsg.DisPatch.EventCreationTime, thing.ThingNo)
 	if err != nil {
 		logger.Error(err)
+		login.loginStatus = LoginStop
+		thing.PushEventChannel(EventLoginRequest, nil)
 		return err
 	}
 
 	thing.ThingStatus = ThingRegisteredLogined
-	thing.PushEventChannel(EventSaveThingStatusLogined, nil)
-
+	thing.SetThingStatusToDB(ThingRegisteredLogined)
+	logger.Info(login.loginReqServData.ThingId, "Login success!")
 	login.loginStatus = LoginStop
 
 	return nil

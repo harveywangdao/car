@@ -6,7 +6,7 @@ import (
 	"log"
 )
 
-func initIOT() {
+func initIoT() {
 	//fileHandler := logger.NewFileHandler("test.log")
 	//logger.SetHandlers(logger.Console, fileHandler)
 	logger.SetHandlers(logger.Console)
@@ -16,7 +16,7 @@ func initIOT() {
 }
 
 func main() {
-	initIOT()
+	initIoT()
 	logger.Debug("Start Server...")
 	server.Server()
 }

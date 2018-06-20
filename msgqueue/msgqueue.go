@@ -35,8 +35,11 @@ func (mqs *MqService) Close() {
 }
 
 func (mqs *MqService) Start() {
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go mqs.mqRecvRoutine()
 	go mqs.mqSendRoutine()
+	wg.Wait()
 }
 
 func (mqs *MqService) consumerRoutine(faWg sync.WaitGroup) error {

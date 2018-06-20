@@ -3,6 +3,7 @@ package gateway
 import (
 	"encoding/json"
 	"errors"
+	"github.com/harveywangdao/road/database/mongo"
 	"github.com/harveywangdao/road/log/logger"
 	"github.com/harveywangdao/road/message"
 	"github.com/harveywangdao/road/util"
@@ -48,6 +49,22 @@ func (upload *ThingInfoUpload) ThingInfoUploadReq(thing *Thing, reqMsg *message.
 	}
 
 	logger.Info("thingInfor =", string(reqMsg.ServData))
+
+	session, err := mongo.CloneMgoSession()
+	if err != nil {
+		logger.Error(err)
+		return err
+	}
+	defer session.Close()
+
+	c := session.DB("iotmgodb").C("ThingInforData")
+	err = c.Insert(thingInfor)
+	if err != nil {
+		logger.Error(err)
+		return err
+	}
+
+	logger.Info("Save to mongo!")
 
 	thing.PushEventChannel(EventThingInfoUploadAck, reqMsg)
 

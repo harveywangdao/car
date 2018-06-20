@@ -6,6 +6,7 @@ import (
 	"crypto/cipher"
 	"errors"
 	"fmt"
+	"github.com/harveywangdao/road/log/logger"
 )
 
 const (
@@ -13,6 +14,8 @@ const (
 )
 
 func AesEncrypt(plaintext []byte, key []byte) ([]byte, error) {
+	logger.Debug("AesEncrypt plaintext =", plaintext)
+
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, errors.New("invalid decrypt key")
@@ -21,6 +24,7 @@ func AesEncrypt(plaintext []byte, key []byte) ([]byte, error) {
 	blockSize := block.BlockSize()
 
 	plaintext = PKCS5Padding(plaintext, blockSize)
+	logger.Debug("AesEncrypt plaintext =", plaintext)
 
 	iv := []byte(ivDefValue)
 
@@ -30,17 +34,20 @@ func AesEncrypt(plaintext []byte, key []byte) ([]byte, error) {
 
 	blockMode.CryptBlocks(ciphertext, plaintext)
 
+	logger.Debug("AesEncrypt ciphertext =", ciphertext)
+
 	return ciphertext, nil
 }
 
 func AesDecrypt(ciphertext []byte, key []byte) ([]byte, error) {
+	logger.Debug("AesDecrypt ciphertext =", ciphertext)
 
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, errors.New("invalid decrypt key")
 	}
 
-	blockSize := block.BlockSize()
+	blockSize := block.BlockSize() //16
 
 	if len(ciphertext) < blockSize {
 		return nil, errors.New("ciphertext too short")
@@ -57,8 +64,13 @@ func AesDecrypt(ciphertext []byte, key []byte) ([]byte, error) {
 	plaintext := make([]byte, len(ciphertext))
 
 	blockModel.CryptBlocks(plaintext, ciphertext)
+	logger.Debug("AesDecrypt plaintext =", plaintext)
+	plaintext, err = PKCS5UnPadding(plaintext, blockSize)
+	if err != nil {
+		return nil, errors.New("data error!")
+	}
 
-	plaintext = PKCS5UnPadding(plaintext)
+	logger.Debug("AesDecrypt plaintext =", plaintext)
 
 	return plaintext, nil
 }
@@ -69,10 +81,18 @@ func PKCS5Padding(src []byte, blockSize int) []byte {
 	return append(src, padtext...)
 }
 
-func PKCS5UnPadding(src []byte) []byte {
+func PKCS5UnPadding(src []byte, blockSize int) ([]byte, error) {
 	length := len(src)
 	unpadding := int(src[length-1])
-	return src[:(length - unpadding)]
+
+	logger.Debug("length =", length)
+	logger.Debug("unpadding =", unpadding)
+
+	if unpadding > blockSize {
+		return nil, errors.New("Data error!")
+	}
+
+	return src[:(length - unpadding)], nil
 }
 
 func testAes() {

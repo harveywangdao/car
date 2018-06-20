@@ -15,8 +15,8 @@ const (
 	RegisterFailure byte = 0xA8
 	AlreadyRegister byte = 0x79
 
-	CheckRegAckTimerTime   = 1 * time.Second
-	CheckRegAgainTimerTime = 5 * time.Second
+	CheckRegAckTimerTime   = 10 * time.Second
+	CheckRegAgainTimerTime = 10 * time.Second
 )
 
 const (
@@ -31,16 +31,19 @@ type Register struct {
 
 	registerStatus int
 
-	registerStart bool
+	registerStart   bool
+	registerReqData *RegisterReqData
+
+	regReqEventCreatTime uint32
 }
 
 type RegisterReqData struct {
-	PerAesKey  uint16
-	VIN        string
-	TBoxSN     string
-	IMSI       string
-	RollNumber uint16
-	ICCID      string
+	PerAesKey  string `json:"peraeskey"`
+	ThingId    string `json:"thingid"`
+	TBoxSN     string `json:"tboxsn"`
+	IMSI       string `json:"imsi"`
+	RollNumber string `json:"rollnumber"`
+	ICCID      string `json:"iccid"`
 }
 
 type RegisterAckMsg struct {
@@ -49,7 +52,7 @@ type RegisterAckMsg struct {
 	Bid         uint32 `json:"bid"`
 }
 
-func (reg *Register) saveRegisterDataToDB(bid, eventCreationTime uint32, newAesKey string) error {
+func (reg *Register) saveRegisterDataToDB(bid, eventCreationTime uint32, newAesKey string, thingNo int) error {
 	thingDB, err := database.GetDB(DBName)
 	if err != nil {
 		logger.Error(err)
@@ -63,7 +66,7 @@ func (reg *Register) saveRegisterDataToDB(bid, eventCreationTime uint32, newAesK
 	}
 	defer stmtUpd.Close()
 
-	_, err = stmtUpd.Exec(int(bid), newAesKey, eventCreationTime, 1)
+	_, err = stmtUpd.Exec(int(bid), newAesKey, eventCreationTime, thingNo)
 	if err != nil {
 		logger.Error(err)
 		return err
@@ -73,14 +76,14 @@ func (reg *Register) saveRegisterDataToDB(bid, eventCreationTime uint32, newAesK
 }
 
 func GetEventCreationTime(id int) (uint32, error) {
-	thingDB, err := database.GetDB(DBName)
+	db, err := database.GetDB(DBName)
 	if err != nil {
 		logger.Error(err)
 		return 0, err
 	}
 
 	var eventCreatTime uint32
-	err = thingDB.QueryRow("SELECT eventcreationtime FROM thingbaseinfodata_tbl WHERE id = ?", id).Scan(&eventCreatTime)
+	err = db.QueryRow("SELECT eventcreationtime FROM thingbaseinfodata_tbl WHERE id = ?", id).Scan(&eventCreatTime)
 	if err != nil {
 		logger.Error(err)
 		return 0, err
@@ -89,8 +92,8 @@ func GetEventCreationTime(id int) (uint32, error) {
 	return eventCreatTime, nil
 }
 
-func (reg *Register) getServiceData() ([]byte, error) {
-	thingDB, err := database.GetDB(DBName)
+func (reg *Register) getServiceData(ThingNo int) ([]byte, error) {
+	db, err := database.GetDB(DBName)
 	if err != nil {
 		logger.Error(err)
 		return nil, err
@@ -98,7 +101,7 @@ func (reg *Register) getServiceData() ([]byte, error) {
 
 	var thingserialno, prethingaes128key, thingid, iccid, imsi, thingaes128key string
 	var id, status, bid, eventCreatTime int
-	err = thingDB.QueryRow("SELECT * FROM thingbaseinfodata_tbl WHERE id = ?", 1).Scan(
+	err = db.QueryRow("SELECT * FROM thingbaseinfodata_tbl WHERE id = ?", ThingNo).Scan(
 		&id,
 		&thingserialno,
 		&prethingaes128key,
@@ -115,15 +118,16 @@ func (reg *Register) getServiceData() ([]byte, error) {
 		return nil, err
 	}
 
-	registerMessageMap := make(map[string]interface{})
-	registerMessageMap["prethingaes128key"] = prethingaes128key
-	registerMessageMap["thingid"] = thingid
-	registerMessageMap["thingserialno"] = thingserialno
-	registerMessageMap["imsi"] = imsi
-	registerMessageMap["rollnumber"] = util.GenRandomString(16)
-	registerMessageMap["iccid"] = iccid
+	reg.registerReqData = &RegisterReqData{
+		PerAesKey:  prethingaes128key,
+		ThingId:    thingid,
+		TBoxSN:     thingserialno,
+		IMSI:       imsi,
+		RollNumber: util.GenRandomString(16),
+		ICCID:      iccid,
+	}
 
-	serviceData, err := json.Marshal(registerMessageMap)
+	serviceData, err := json.Marshal(reg.registerReqData)
 	if err != nil {
 		logger.Error(err)
 		return nil, err
@@ -145,6 +149,8 @@ func (reg *Register) getDispatchData(encryptServData []byte) ([]byte, error) {
 	dd.Result = 0
 	dd.SecurityVersion = message.Encrypt_No
 	dd.DispatchCreationTime = uint32(time.Now().Unix())
+
+	reg.regReqEventCreatTime = dd.EventCreationTime
 
 	dispatchData, err := util.StructToByteSlice(dd)
 	if err != nil {
@@ -178,18 +184,19 @@ func (reg *Register) RegisterReq(thing *Thing) error {
 		return errors.New("Register already started.")
 	}
 
+	thing.ThingStatus = ThingUnRegister
+	thing.SetThingStatusToDB(ThingUnRegister)
+
 	reg.registerStart = true
-	if reg.closeRegAckTimer == nil {
-		reg.closeRegAckTimer = make(chan bool, 1)
-	}
 
 	msg := message.Message{
 		Connection: thing.Conn,
 	}
 
-	serviceData, err := reg.getServiceData()
+	serviceData, err := reg.getServiceData(thing.ThingNo)
 	if err != nil {
 		logger.Error(err)
+		reg.registerStart = false
 		return err
 	}
 
@@ -198,25 +205,33 @@ func (reg *Register) RegisterReq(thing *Thing) error {
 	dispatchData, err := reg.getDispatchData(encryptServData)
 	if err != nil {
 		logger.Error(err)
+		reg.registerStart = false
 		return err
 	}
 
 	messageHeaderData, err := reg.getMessageHeaderData(serviceData)
 	if err != nil {
 		logger.Error(err)
+		reg.registerStart = false
 		return err
 	}
 
 	data, err := msg.GetOneMessage(messageHeaderData, dispatchData, encryptServData)
 	if err != nil {
 		logger.Error(err)
+		reg.registerStart = false
 		return err
 	}
 
 	err = msg.SendOneMessage(data)
 	if err != nil {
 		logger.Error(err)
+		reg.registerStart = false
 		return err
+	}
+
+	if reg.closeRegAckTimer == nil {
+		reg.closeRegAckTimer = make(chan bool, 1)
 	}
 
 	if reg.regReqTimes < RegisterReqMaxTimes {
@@ -242,31 +257,28 @@ func (reg *Register) RegisterReq(thing *Thing) error {
 }
 
 func (reg *Register) RegisterACK(thing *Thing, msg *message.Message) error {
-	if reg.regReqTimes > 0 {
-		reg.checkRegAckTimer.Stop()
-		reg.closeRegAckTimer <- true
-		reg.regReqTimes = 0
+	if !reg.registerStart {
+		logger.Error("Need Register!")
+		return errors.New("Need Register!")
 	}
 
-	if thing.ThingStatus != ThingUnRegister {
-		logger.Error("Already Registered!")
-		return errors.New("Already Registered!")
-	}
-
-	registerAckMsg := RegisterAckMsg{}
-
-	eventCreatTime, err := GetEventCreationTime(1)
+	/*  eventCreatTime, err := GetEventCreationTime(thing.ThingNo)
 	if err != nil {
 		logger.Error(err)
 		goto FAILURE
+	}*/
+
+	if reg.regReqEventCreatTime != msg.DisPatch.EventCreationTime {
+		logger.Error("Package out of date!")
+		return errors.New("Package out of date!")
 	}
 
-	if eventCreatTime == msg.DisPatch.EventCreationTime {
-		logger.Error("Repeated RegisterACK!")
-		goto FAILURE
-	}
+	reg.checkRegAckTimer.Stop()
+	reg.closeRegAckTimer <- true
+	reg.regReqTimes = 0
 
-	err = json.Unmarshal(msg.ServData, &registerAckMsg)
+	registerAckMsg := RegisterAckMsg{}
+	err := json.Unmarshal(msg.ServData, &registerAckMsg)
 	if err != nil {
 		logger.Error(err)
 		goto FAILURE
@@ -281,13 +293,14 @@ func (reg *Register) RegisterACK(thing *Thing, msg *message.Message) error {
 		logger.Error("Register fail!")
 		goto FAILURE
 	} else {
-		err = reg.saveRegisterDataToDB(registerAckMsg.Bid, msg.DisPatch.EventCreationTime, registerAckMsg.CallbackNum)
+		err = reg.saveRegisterDataToDB(registerAckMsg.Bid, msg.DisPatch.EventCreationTime, registerAckMsg.CallbackNum, thing.ThingNo)
 		if err != nil {
 			logger.Error(err)
 			goto FAILURE
 		}
 	}
 
+	logger.Info(reg.registerReqData.ThingId, "Register success!")
 	thing.ThingStatus = ThingRegisteredUnLogin
 	thing.SetThingStatusToDB(ThingRegisteredUnLogin)
 	thing.PushEventChannel(EventLoginRequest, nil)

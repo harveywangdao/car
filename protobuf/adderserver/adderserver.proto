@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package adderserver;
+
+service Adder {
+  rpc Add (AddRequest) returns (AddReply) {}
+}
+
+message AddRequest {
+  double  addparameter1= 1;
+  double  addparameter2= 2;
+}
+
+message AddReply {
+  double sum = 1;
+}

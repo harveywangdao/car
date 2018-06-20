@@ -5,71 +5,6 @@ windows上第一次运行系统的操作步骤
 
 二、执行
 1.MySQL
-1.1 启动MySQL
-
-mysql -u root -p 
-123456
-
-增加T-Box的数据库：
-create database thingdb;
-use thingdb;
-
-CREATE TABLE `thingfactorydata_tbl` (
-    `id` INT NOT NULL AUTO_INCREMENT,
-    `thingserialno` VARCHAR(29) NOT NULL,
-    `prethingaes128key` VARCHAR(16) NOT NULL,
-    `vin` VARCHAR(17) NOT NULL,
-    `iccid` VARCHAR(20) NOT NULL,
-    `imsi` VARCHAR(15) NOT NULL,
-    `status` TINYINT NOT NULL,
-    `bid` INT UNSIGNED NOT NULL,
-    `thingaes128key` VARCHAR(16) NOT NULL,
-    `eventcreationtime` INT UNSIGNED NOT NULL,
-    PRIMARY KEY(`id`)
-)ENGINE=InnoDB DEFAULT CHARSET=utf8;
-
-INSERT INTO thingfactorydata_tbl (thingserialno,prethingaes128key,vin,iccid,imsi,status,bid,thingaes128key,eventcreationtime) VALUES (
-    "12345678901234567890123456789",
-    "1234567890123456",
-    "WDDUX52684DFR4582",
-    "12345678901234567890",
-    "HGTSN12584UHGTE",
-    0,
-    0,
-    "1234567890123456",
-    0);
-
-
-
-增加iov后台的数据库：
-create database iovdb;
-use iovdb;
-
-CREATE TABLE `thingbaseinfo_tbl` (
-    `id` INT NOT NULL AUTO_INCREMENT,
-    `thingserialno` VARCHAR(29) NOT NULL,
-    `prethingaes128key` VARCHAR(16) NOT NULL,
-    `vin` VARCHAR(17) NOT NULL,
-    `iccid` VARCHAR(20) NOT NULL,
-    `imsi` VARCHAR(15) NOT NULL,
-    `status` TINYINT NOT NULL,
-    `bid` INT UNSIGNED NOT NULL,
-    `thingaes128key` VARCHAR(16) NOT NULL,
-    `eventcreationtime` INT UNSIGNED NOT NULL,
-    PRIMARY KEY(`id`)
-)ENGINE=InnoDB DEFAULT CHARSET=utf8;
-
-INSERT INTO thingbaseinfo_tbl (thingserialno,prethingaes128key,vin,iccid,imsi,status,bid,thingaes128key,eventcreationtime) VALUES (
-    "12345678901234567890123456789",
-    "1234567890123456",
-    "WDDUX52684DFR4582",
-    "12345678901234567890",
-    "HGTSN12584UHGTE",
-    0,
-    0,
-    "1234567890123456",
-    0);
-
 CREATE TABLE `VehicleStatusInfor_tbl` (
     `id` INT NOT NULL AUTO_INCREMENT,
 
@@ -106,90 +41,6 @@ CREATE TABLE `VehicleStatusInfor_tbl` (
 
 ALTER TABLE VehicleStatusInfor_tbl ADD CONSTRAINT VehicleStatusInfor_FK_ID FOREIGN KEY(thing_id) REFERENCES thingbaseinfo_tbl(id);
 
-
-CREATE TABLE `EngineStatusInfor_tbl` (
-    `id` INT NOT NULL AUTO_INCREMENT,
-
-    `EngineSpeed` DOUBLE NOT NULL,
-    `EngineRunTime` INT NOT NULL,
-    `VehicleRunTime` INT NOT NULL,
-    `EngState` TINYINT NOT NULL,
-    `GearLevPos` TINYINT NOT NULL,
-
-    `thing_id` INT NOT NULL,
-
-    PRIMARY KEY(`id`)
-)ENGINE=InnoDB DEFAULT CHARSET=utf8;
-
-ALTER TABLE EngineStatusInfor_tbl ADD CONSTRAINT EngineStatusInfor_FK_ID FOREIGN KEY(thing_id) REFERENCES thingbaseinfo_tbl(id);
-
-CREATE TABLE `VehicleGpsInfor_tbl` (
-    `id` INT NOT NULL AUTO_INCREMENT,
-
-    `Latitude` DOUBLE NOT NULL,
-    `Longitude` DOUBLE NOT NULL,
-    `Altitude` DOUBLE NOT NULL,
-    `Speed` DOUBLE NOT NULL,
-    `Bearing` DOUBLE NOT NULL,
-    `Accuracy` DOUBLE NOT NULL,
-    `Time` BIGINT  NOT NULL,
-
-    `thing_id` INT NOT NULL,
-
-    PRIMARY KEY(`id`)
-)ENGINE=InnoDB DEFAULT CHARSET=utf8;
-
-ALTER TABLE VehicleGpsInfor_tbl ADD CONSTRAINT VehicleGpsInfor_FK_ID FOREIGN KEY(thing_id) REFERENCES thingbaseinfo_tbl(id);
-
-
-
-DBHostIP   = "127.0.0.1:3306"
-DBUsername = "root"
-DBPassword = "123456"
-DriverName = "mysql"
-
-
-2.Redis
-cd D:\redis
-redis-server.exe redis.windows.conf
-
-#redis-cli.exe -h 127.0.0.1 -p 6379
-#KEYS *
-#FLUSHALL
-#KEYS *
-
-REDIS_ADDR     = "localhost:6379"
-
-3.MongoDB
-NET START mongodb
-
-MgoAddr = "localhost:27017"
-
-4.Zookeeper
-zkserver
-
-zookeeper.connect=localhost:2181
-
-5.Kafka
-cd D:\kafka_2.12-1.0.0
-bin\windows\kafka-server-start.bat config\server.properties
-
-MQAddr             = "localhost:9092"
-
-cd D:\kafka_2.12-1.0.0
-bin\windows\kafka-topics.bat --create --zookeeper localhost:2181 --replication-factor 1 --partitions 10 --topic TspToIov
-bin\windows\kafka-topics.bat --create --zookeeper localhost:2181 --replication-factor 1 --partitions 10 --topic IovToTsp
-
-bin\windows\kafka-topics.bat --create --zookeeper localhost:2181 --replication-factor 1 --partitions 10 --topic FinanceLeaseLockCarToGateway
-bin\windows\kafka-topics.bat --create --zookeeper localhost:2181 --replication-factor 1 --partitions 10 --topic GatewayToFinanceLeaseLockCar
-
-bin\windows\kafka-console-producer.bat --broker-list localhost:9092 --topic FinanceLeaseLockCarToGateway
-bin\windows\kafka-console-consumer.bat --zookeeper localhost:2181 --topic GatewayToFinanceLeaseLockCar
-
-
-bin\windows\kafka-console-consumer.bat --zookeeper localhost:2181 --topic FinanceLeaseLockCarToGateway
-  
-
 Ubuntu上部署：
 github.com/harveywangdao/road/
 go get github.com/Shopify/sarama
@@ -205,6 +56,7 @@ go get gopkg.in/mgo.v2
 二、执行
 1.MySQL
 1.1 启动MySQL
+sudo netstat -tap | grep mysql
 
 mysql -u root -p 
 123456
@@ -269,6 +121,70 @@ INSERT INTO thingbaseinfodata_tbl (thingserialno,prethingaes128key,thingid,iccid
     "1234567890123456",
     0);
 
+
+    DBHostIP   = "127.0.0.1:3306"
+    DBUsername = "root"
+    DBPassword = "123456"
+    DriverName = "mysql"
+
+cd ~/golang/src/github.com/harveywangdao/road/scripts/
+
+
+
+2.Redis
+sudo /etc/init.d/redis-server start
+
+sudo netstat -tap | grep redis
+
+#redis-cli -h 127.0.0.1 -p 6379 -a 123456
+#KEYS *
+#FLUSHALL
+#KEYS *
+
+REDIS_ADDR     = "localhost:6379"
+
+3.MongoDB
+sudo service mongodb start
+
+sudo netstat -tap | grep mongod
+
+MgoAddr = "localhost:27017"
+
+4.Zookeeper
+zkServer.sh start
+
+zookeeper.connect=localhost:2181
+
+5.Kafka
+cd server/kafka_2.12-1.1.0
+bin/kafka-server-start.sh config/server.properties
+
+MQAddr = "localhost:9092"
+
+cd server/kafka_2.12-1.1.0
+bin/kafka-topics.sh --create --zookeeper localhost:2181 --replication-factor 1 --partitions 10 --topic WebToGateway
+bin/kafka-topics.sh --create --zookeeper localhost:2181 --replication-factor 1 --partitions 10 --topic GatewayToWeb
+
+bin/kafka-topics.sh --list --zookeeper localhost:2181
+
+bin/kafka-console-producer.sh --broker-list localhost:9092 --topic WebToGateway
+#bin/kafka-console-consumer.sh --zookeeper localhost:2181 --topic WebToGateway --from-beginning 2>/dev/null
+
+#bin/kafka-console-producer.sh --broker-list localhost:9092 --topic GatewayToWeb
+bin/kafka-console-consumer.sh --zookeeper localhost:2181 --topic GatewayToWeb --from-beginning 2>/dev/null
+
+cd ~/server/kafka_2.12-1.1.0/logs
+rm -rf *
+cd /tmp/kafka-logs
+rm -rf *
+
+zkServer.sh stop
+cd ~/server/zookeeper-3.4.10/data
+rm -rf *
+cd ~/server/zookeeper-3.4.10/logs
+rm -rf *
+
+
 6.iot
   cd golang/src/github.com/harveywangdao/road/iot
   监听 6023 端口
@@ -276,3 +192,18 @@ INSERT INTO thingbaseinfodata_tbl (thingserialno,prethingaes128key,thingid,iccid
 7.iot_client
   cd golang/src/github.com/harveywangdao/road/iot_client
   thing当前连接 127.0.0.1:6023 端口
+
+8.gRPC & Protobuf
+  cd golang/src/github.com/harveywangdao/road/protobuf
+  #protoc --go_out=. *.proto
+  protoc --go_out=plugins=grpc:. *.proto
+
+
+
+
+
+
+
+
+
+

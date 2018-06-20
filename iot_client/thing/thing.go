@@ -21,6 +21,7 @@ const (
 	AesValidityDurationTime       = 24*60*60 - 10*60 /*24hours - 10minute*/
 	AesKeyOutOfDateTime           = 24 * 60 * 60
 	CheckAesKeyValidityTickerTime = 5 * time.Minute
+	ConnectServerDelayTime        = 5 * time.Second
 )
 
 type Thing struct {
@@ -111,6 +112,7 @@ func (thing *Thing) SetThingStatusToDB(status int) error {
 		return err
 	}
 
+	logger.Debug("status =", status)
 	stmtUpd, err := db.Prepare("UPDATE thingbaseinfodata_tbl SET status=? where id=?")
 	if err != nil {
 		logger.Error(err)
@@ -173,7 +175,7 @@ func (thing *Thing) checkAesKeyValidity() error {
 	return nil
 }
 
-func (thing *Thing) eventInit() error {
+func (thing *Thing) tboxInit() error {
 	status, err := thing.getThingStatusFromDB()
 	if err != nil {
 		logger.Error(err)
@@ -191,15 +193,37 @@ func (thing *Thing) connectServer() error {
 	conn, err := net.Dial("tcp", thing.IPPort)
 	if err != nil {
 		logger.Error("Dial fail!", err)
-		thing.PushEventChannel(EventConnectServer, nil)
+
+		connectServerDelayTimer := time.NewTimer(ConnectServerDelayTime)
+
+		go func() {
+			logger.Debug("Start timer......")
+			select {
+			case <-connectServerDelayTimer.C:
+				logger.Info("Connect server again!")
+				thing.PushEventChannel(EventConnectServer, nil)
+			}
+		}()
+
 		return err
 	}
+
+	logger.Debug("Net =", conn.RemoteAddr().Network(), ", Addr =", conn.RemoteAddr().String())
 
 	thing.Conn = conn
 
 	go thing.taskReadTcp()
 
 	thing.PushEventChannel(EventCheckThingStatus, nil)
+
+	return nil
+}
+
+func (thing *Thing) setStatusWhenBroken() error {
+	if thing.ThingStatus == ThingRegisteredLogined {
+		thing.ThingStatus = ThingRegisteredUnLogin
+		thing.SetThingStatusToDB(ThingRegisteredUnLogin)
+	}
 
 	return nil
 }
@@ -215,6 +239,7 @@ func (thing *Thing) taskReadTcp() {
 		if err != nil {
 			logger.Error(err)
 			if errorCode == message.ErrorCodeConnectionBreak {
+				thing.setStatusWhenBroken()
 				thing.PushEventChannel(EventConnectServer, nil) /*need connect again.*/
 				return
 			} else {
@@ -232,7 +257,7 @@ func (thing *Thing) taskReadTcp() {
 }
 
 func (thing *Thing) eventDispatcher(thingMsg ThingMessage) error {
-	logger.Info("event =", GetEventName(thingMsg.Event))
+	logger.Debug("event =", GetEventName(thingMsg.Event))
 
 	switch thingMsg.Event {
 	case EventCheckThingStatus:
@@ -251,15 +276,6 @@ func (thing *Thing) eventDispatcher(thingMsg ThingMessage) error {
 
 	case EventServerClosed:
 		return errors.New("Server closed!")
-
-		/*	case EventSaveThingStatusUnRegister:
-				thing.SetThingStatusToDB(ThingUnRegister)
-
-			case EventSaveThingStatusUnLogin:
-				thing.SetThingStatusToDB(ThingRegisteredUnLogin)
-		*/
-	case EventSaveThingStatusLogined:
-		thing.SetThingStatusToDB(ThingRegisteredLogined)
 
 	case RegisterReqEventMessage:
 		thing.ThingStatus = ThingUnRegister
@@ -280,8 +296,8 @@ func (thing *Thing) eventDispatcher(thingMsg ThingMessage) error {
 
 	case EventLoginSuccess:
 		thing.login.LoginSuccess(thing, thingMsg.Msg)
-		thing.PushEventChannel(EventHeartbeatRequest, nil)
-		thing.PushEventChannel(EventThingInfoUpload, nil)
+		//thing.PushEventChannel(EventHeartbeatRequest, nil)
+		//thing.PushEventChannel(EventThingInfoUpload, nil)
 
 	case EventLoginFailure:
 		thing.login.LoginFailure(thing, thingMsg.Msg)
@@ -338,7 +354,7 @@ func (thing *Thing) eventDispatcher(thingMsg ThingMessage) error {
 func (thing *Thing) ThingScheduler() error {
 	defer thing.eventDestory()
 
-	err := thing.eventInit()
+	err := thing.tboxInit()
 	if err != nil {
 		logger.Error(err)
 		return err

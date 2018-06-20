@@ -10,7 +10,8 @@ import (
 )
 
 const (
-	ReloginTimeoutTime = 2 * time.Second
+	ReloginTimeoutTime = 10 * time.Second
+	ReLoginAgainTime   = 10 * time.Second
 
 	ReLoginMessageFlag = 0x0
 
@@ -24,33 +25,21 @@ const (
 const (
 	ReLoginStop = iota
 	ReLoginReqStatus
-	/*ReLoginAckStatus*/
 )
 
 type ReLogin struct {
 	timeoutTimer      *time.Timer
 	closeTimeoutTimer chan bool
 
-	reloginStatus int
+	reloginStatus         int
+	reLoginEventCreatTime uint32
 }
 
 type ReLoginReqServData struct {
 	NewTime byte `json:"newtime"` //NewTime*10 minute
 }
 
-func (relogin *ReLogin) ReLoginReq(thing *Thing) error {
-	if relogin.reloginStatus != ReLoginStop {
-		logger.Error("Relogin already start!")
-		return errors.New("Relogin already start!")
-	}
-
-	/*	if thing.ThingStatus != ThingRegisteredLogined{
-		logger.Error("Not login or register")
-		return errors.New("Not login or register")
-	}*/
-
-	relogin.reloginStatus = ReLoginReqStatus
-
+func (relogin *ReLogin) reLoginReqSendData(thing *Thing) error {
 	msg := message.Message{
 		Connection: thing.Conn,
 	}
@@ -99,6 +88,8 @@ func (relogin *ReLogin) ReLoginReq(thing *Thing) error {
 		return err
 	}
 
+	relogin.reLoginEventCreatTime = dd.EventCreationTime
+
 	//Message header data
 	mh := message.MessageHeader{
 		FixHeader:        message.MessageHeaderID,
@@ -118,6 +109,39 @@ func (relogin *ReLogin) ReLoginReq(thing *Thing) error {
 	err = msg.SendMessage(messageHeaderData, dispatchData, encryptServData)
 	if err != nil {
 		logger.Error(err)
+		return err
+	}
+
+	return nil
+}
+
+func (relogin *ReLogin) ReLoginReq(thing *Thing) error {
+	if relogin.reloginStatus != ReLoginStop {
+		logger.Error("Relogin already start!")
+		return errors.New("Relogin already start!")
+	}
+
+	/*	if thing.TboxStatus != TboxRegisteredLogined{
+		logger.Error("Not login or register")
+		return errors.New("Not login or register")
+	}*/
+
+	relogin.reloginStatus = ReLoginReqStatus
+
+	err := relogin.reLoginReqSendData(thing)
+	if err != nil {
+		t := time.NewTimer(ReLoginAgainTime)
+
+		go func() {
+			select {
+			case <-t.C:
+				logger.Info("ReLogin fail, ReLogin again!")
+				thing.PushEventChannel(EventReLoginRequest, nil)
+			}
+		}()
+
+		relogin.reloginStatus = ReLoginStop
+
 		return err
 	}
 
@@ -150,6 +174,11 @@ func (relogin *ReLogin) ReLoginAck(thing *Thing, respMsg *message.Message) error
 	if relogin.reloginStatus != ReLoginReqStatus {
 		logger.Error("Need ReLoginReq!")
 		return errors.New("Need ReLoginReq!")
+	}
+
+	if relogin.reLoginEventCreatTime != respMsg.DisPatch.EventCreationTime {
+		logger.Error("Package out of date!")
+		return errors.New("Package out of date!")
 	}
 
 	relogin.timeoutTimer.Stop()

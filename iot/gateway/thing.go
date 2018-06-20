@@ -20,9 +20,10 @@ const (
 )
 
 type Thing struct {
-	ThingMsgChan  chan ThingMessage
-	Conn          message.MessageConn
-	ThingConnChan chan ThingConn
+	ThingMsgChan        chan ThingMessage
+	Conn                message.MessageConn
+	AddThingConnChan    chan ThingConn
+	DeleteThingConnChan chan ThingConn
 
 	bid     uint32
 	thingid string
@@ -51,7 +52,7 @@ func (thing *Thing) SetThingIdAndBid(thingid string, bid uint32) error {
 		ThingID:      thing.thingid,
 		ThingService: thing,
 	}
-	thing.ThingConnChan <- ThingConn
+	thing.AddThingConnChan <- ThingConn
 
 	return nil
 }
@@ -68,7 +69,7 @@ func (thing *Thing) GetAesKey() (string, error) {
 	}
 
 	var thingaes128key string
-	err = db.QueryRow("SELECT thingaes128key FROM thingbaseinfodata_tbl WHERE bid = ?", thing.bid).Scan(
+	err = db.QueryRow("SELECT thingaes128key FROM thingbaseinfodata_tbl WHERE thingid = ?", thing.thingid).Scan(
 		&thingaes128key)
 	if err != nil {
 		logger.Error(err)
@@ -90,7 +91,7 @@ func (thing *Thing) CheckAesKeyOutOfDate(bid uint32) bool {
 	}
 
 	var eventcreationtime uint32
-	err = db.QueryRow("SELECT eventcreationtime FROM thingbaseinfodata_tbl WHERE bid = ?", bid).Scan(
+	err = db.QueryRow("SELECT eventcreationtime FROM thingbaseinfodata_tbl WHERE thingid = ?", thing.thingid).Scan(
 		&eventcreationtime)
 	if err != nil {
 		logger.Error(err)
@@ -129,6 +130,29 @@ func (thing *Thing) getAes128Key(bid uint32) string {
 	return thingaes128key
 }
 
+func (thing *Thing) saveTboxState(status int) error {
+	db, err := database.GetDB(DBName)
+	if err != nil {
+		logger.Error(err)
+		return err
+	}
+
+	stmtUpd, err := db.Prepare("UPDATE thingbaseinfodata_tbl SET status=? where thingid=?")
+	if err != nil {
+		logger.Error(err)
+		return err
+	}
+	defer stmtUpd.Close()
+
+	_, err = stmtUpd.Exec(status, thing.thingid)
+	if err != nil {
+		logger.Error(err)
+		return err
+	}
+
+	return nil
+}
+
 func (thing *Thing) taskReadTcp() {
 	for {
 		msg := message.Message{
@@ -156,11 +180,24 @@ func (thing *Thing) taskReadTcp() {
 	}
 }
 
+func (thing *Thing) destoryThing() error {
+	thing.saveTboxState(ThingRegisteredUnLogin)
+
+	ThingConn := ThingConn{
+		ThingID:      thing.thingid,
+		ThingService: thing,
+	}
+	thing.DeleteThingConnChan <- ThingConn
+
+	return nil
+}
+
 func (thing *Thing) eventDispatcher(thingMsg ThingMessage) error {
-	logger.Info("event =", GetEventName(thingMsg.Event))
+	logger.Debug("event =", GetEventName(thingMsg.Event))
 
 	switch thingMsg.Event {
 	case EventConnectionClosed:
+		thing.destoryThing()
 		return errors.New("Connection closed!")
 
 	case RegisterReqEventMessage:
@@ -180,10 +217,10 @@ func (thing *Thing) eventDispatcher(thingMsg ThingMessage) error {
 
 	case EventLoginSuccess:
 		thing.login.LoginSuccess(thing, thingMsg.Msg)
-		thing.PushEventChannel(EventReLoginRequest, nil)
-		thing.PushEventChannel(EventReadConfigRequest, nil)
-		thing.PushEventChannel(EventSetConfigRequest, nil)
-		thing.PushEventChannel2(EventRemoteOperationRequest, nil, "lock")
+		//thing.PushEventChannel(EventReLoginRequest, nil)
+		//thing.PushEventChannel(EventReadConfigRequest, nil)
+		//thing.PushEventChannel(EventSetConfigRequest, nil)
+		//thing.PushEventChannel2(EventRemoteOperationRequest, nil, "lock")
 
 	case EventLoginFailure:
 		thing.login.LoginFailure(thing, thingMsg.Msg)
@@ -289,11 +326,12 @@ func (thing *Thing) thingDestory() error {
 	return nil
 }
 
-func NewThing(msgChan chan ThingMessage, conn message.MessageConn, thingConnChan chan ThingConn) (*Thing, error) {
+func NewThing(msgChan chan ThingMessage, conn message.MessageConn, addThingConnChan, delThingConnChan chan ThingConn) (*Thing, error) {
 	thing := Thing{}
 	thing.Conn = conn
 	thing.ThingMsgChan = msgChan
-	thing.ThingConnChan = thingConnChan
+	thing.AddThingConnChan = addThingConnChan
+	thing.DeleteThingConnChan = delThingConnChan
 
 	return &thing, nil
 }

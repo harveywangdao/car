@@ -7,7 +7,7 @@ import (
 
 const (
 	maxGoroutineNum = 1
-	IPPort          = "127.0.0.1:6023"
+	IPPort          = "127.0.0.1:6024"
 )
 
 func thingConnHandler(wg sync.WaitGroup, thingNo int) {

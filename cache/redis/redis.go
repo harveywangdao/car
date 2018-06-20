@@ -16,6 +16,7 @@ const (
 	MAX_IDLE_NUM   = 2
 	MAX_ACTIVE_NUM = 20
 	REDIS_ADDR     = "localhost:6379"
+	REDISPASSWORD  = "180498"
 )
 
 var (
@@ -34,14 +35,16 @@ func init() {
 				logger.Error(err)
 				return nil, err
 			}
-			/*			if _, err := c.Do("AUTH", password); err != nil {
-							c.Close()
-							return nil, err
-						}
-						if _, err := c.Do("SELECT", db); err != nil {
-							c.Close()
-							return nil, err
-						}*/
+
+			if _, err := c.Do("AUTH", REDISPASSWORD); err != nil {
+				c.Close()
+				return nil, err
+			}
+			/*
+				if _, err := c.Do("SELECT", db); err != nil {
+					c.Close()
+					return nil, err
+				}*/
 			return c, nil
 		},
 		TestOnBorrow: func(c redis.Conn, t time.Time) error {
@@ -94,7 +97,7 @@ func (red *Redis) CreateListByInt64Slice(key string, data []int64) error {
 	for i := 0; i < len(data); i++ {
 		_, err := red.conn.Do("RPUSH", key, data[i])
 		if err != nil {
-			logger.Info(err)
+			logger.Error(err)
 			return err
 		}
 	}

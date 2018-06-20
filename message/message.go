@@ -213,8 +213,8 @@ func (msg *Message) ParseOneMessage(originMessageData []byte) ([]byte, error) {
 	serviceDataCheck := util.DataXOR(msg.ServData)
 	if serviceDataCheck != msg.MesHeader.ServiceDataCheck {
 		logger.Error("Service data check error!")
-		//return nil, errors.New("service data check error!")
-		return msg.ServData, nil
+		return nil, errors.New("service data check error!")
+		//return msg.ServData, nil
 	}
 
 	return msg.ServData, nil

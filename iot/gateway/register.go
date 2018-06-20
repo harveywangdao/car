@@ -11,6 +11,12 @@ import (
 	"time"
 )
 
+import (
+	pb "github.com/harveywangdao/road/protobuf/adderserver"
+	"golang.org/x/net/context"
+	"google.golang.org/grpc"
+)
+
 const (
 	RegisterSuccess byte = 0x78
 	RegisterFailure byte = 0xA8
@@ -18,26 +24,26 @@ const (
 )
 
 type Register struct {
+	registerReqData *RegisterReqData
 }
 
 type RegisterReqData struct {
-	PerAesKey  uint16
-	ThingID    string
-	TBoxSN     string
-	IMSI       string
-	RollNumber uint16
-	ICCID      string
+	PerAesKey  string `json:"peraeskey"`
+	ThingId    string `json:"thingid"`
+	TBoxSN     string `json:"tboxsn"`
+	IMSI       string `json:"imsi"`
+	RollNumber string `json:"rollnumber"`
+	ICCID      string `json:"iccid"`
 }
 
-func (re *Register) genCallbackNum(regReqMsg *message.Message) string {
-	regMsgMap := make(map[string]string)
-	err := json.Unmarshal(regReqMsg.ServData, &regMsgMap)
-	if err != nil {
-		logger.Error(err)
-		return ""
-	}
+type RegisterAckMsg struct {
+	Status      byte   `json:"status"`
+	CallbackNum string `json:"callbacknumber"`
+	Bid         uint32 `json:"bid"`
+}
 
-	data := md5.GenMd5([]byte(regMsgMap["prethingaes128key"] + regMsgMap["rollnumber"]))
+func (re *Register) genCallbackNum() string {
+	data := md5.GenMd5([]byte(re.registerReqData.PerAesKey + re.registerReqData.RollNumber))
 	cbn := util.Substr(hex.EncodeToString(data), 0, 16)
 
 	logger.Debug("data =", data, "hex string(data) =", hex.EncodeToString(data))
@@ -46,27 +52,18 @@ func (re *Register) genCallbackNum(regReqMsg *message.Message) string {
 	return cbn
 }
 
-func (re *Register) checkRegisterData(regReqMsg *message.Message) byte {
+func (re *Register) checkRegisterData() byte {
 	result := RegisterFailure //fail
 
-	thingDB, err := database.GetDB(DBName)
+	db, err := database.GetDB(DBName)
 	if err != nil {
 		logger.Error(err)
 		return result
 	}
-
-	regMsgMap := make(map[string]interface{})
-	err = json.Unmarshal(regReqMsg.ServData, &regMsgMap)
-	if err != nil {
-		logger.Error(err)
-		return result
-	}
-
-	logger.Debug("regMsgMap =", regMsgMap)
 
 	var thingserialno, prethingaes128key, thingid, iccid, imsi, thingaes128key string
 	var id, status, bid, eventCreationTime int
-	err = thingDB.QueryRow("SELECT * FROM thingbaseinfodata_tbl WHERE thingserialno = ?", regMsgMap["thingserialno"]).Scan(
+	err = db.QueryRow("SELECT * FROM thingbaseinfodata_tbl WHERE thingid = ?", re.registerReqData.ThingId).Scan(
 		&id,
 		&thingserialno,
 		&prethingaes128key,
@@ -83,15 +80,15 @@ func (re *Register) checkRegisterData(regReqMsg *message.Message) byte {
 		return result
 	}
 
-	if regMsgMap["prethingaes128key"] != prethingaes128key {
+	if re.registerReqData.PerAesKey != prethingaes128key {
 		return result
 	}
 
-	if regMsgMap["thingid"] != thingid {
+	if re.registerReqData.TBoxSN != thingserialno {
 		return result
 	}
 
-	if regMsgMap["imsi"] != imsi && regMsgMap["iccid"] != iccid {
+	if re.registerReqData.IMSI != imsi && re.registerReqData.ICCID != iccid {
 		return result
 	}
 
@@ -105,28 +102,21 @@ func (re *Register) checkRegisterData(regReqMsg *message.Message) byte {
 	return result
 }
 
-func (re *Register) registerThing(regReqMsg *message.Message, bid, eventCreationTime uint32, newAesKey string) error {
-	thingDB, err := database.GetDB(DBName)
+func (re *Register) registerThing(bid, eventCreationTime uint32, newAesKey string) error {
+	db, err := database.GetDB(DBName)
 	if err != nil {
 		logger.Error(err)
 		return err
 	}
 
-	regMsgMap := make(map[string]interface{})
-	err = json.Unmarshal(regReqMsg.ServData, &regMsgMap)
-	if err != nil {
-		logger.Error(err)
-		return err
-	}
-
-	stmtUpd, err := thingDB.Prepare("UPDATE thingbaseinfodata_tbl SET status=?,bid=?,thingaes128key=?,eventcreationtime=? where thingserialno=?")
+	stmtUpd, err := db.Prepare("UPDATE thingbaseinfodata_tbl SET status=?,bid=?,thingaes128key=?,eventcreationtime=? where thingid=?")
 	if err != nil {
 		logger.Error(err)
 		return err
 	}
 	defer stmtUpd.Close()
 
-	_, err = stmtUpd.Exec(ThingRegisteredUnLogin, int(bid), newAesKey, eventCreationTime, regMsgMap["thingserialno"])
+	_, err = stmtUpd.Exec(ThingRegisteredUnLogin, int(bid), newAesKey, eventCreationTime, re.registerReqData.ThingId)
 	if err != nil {
 		logger.Error(err)
 		return err
@@ -172,6 +162,23 @@ func (re *Register) getMessageHeaderData(serviceData []byte, bid uint32) ([]byte
 	return messageHeaderData, nil
 }
 
+func (re *Register) genBid() uint32 {
+	db, err := database.GetDB(DBName)
+	if err != nil {
+		logger.Error(err)
+		return 0
+	}
+
+	var id int
+	err = db.QueryRow("SELECT id FROM thingbaseinfodata_tbl WHERE thingid = ?", re.registerReqData.ThingId).Scan(&id)
+	if err != nil {
+		logger.Error(err)
+		return 0
+	}
+
+	return uint32(id)
+}
+
 func (re *Register) RegisterACK(conn message.MessageConn, regReqMsg *message.Message) error {
 	msg := message.Message{
 		Connection: conn,
@@ -182,12 +189,21 @@ func (re *Register) RegisterACK(conn message.MessageConn, regReqMsg *message.Mes
 	var callbackNum string = ""
 
 	//Check data validity
-	result = re.checkRegisterData(regReqMsg)
-	if result == RegisterSuccess || result == AlreadyRegister {
-		callbackNum = re.genCallbackNum(regReqMsg)
-		bid = util.GenRandUint32()
+	re.registerReqData = &RegisterReqData{}
+	err := json.Unmarshal(regReqMsg.ServData, re.registerReqData)
+	if err != nil {
+		logger.Error(err)
+		return err
+	}
 
-		err := re.registerThing(regReqMsg, bid, regReqMsg.DisPatch.EventCreationTime, callbackNum)
+	logger.Debug("re.registerReqData =", string(regReqMsg.ServData))
+
+	result = re.checkRegisterData()
+	if result == RegisterSuccess || result == AlreadyRegister {
+		callbackNum = re.genCallbackNum()
+		bid = re.genBid()
+
+		err := re.registerThing(bid, regReqMsg.DisPatch.EventCreationTime, callbackNum)
 		if err != nil {
 			logger.Error(err)
 			return err
@@ -195,17 +211,18 @@ func (re *Register) RegisterACK(conn message.MessageConn, regReqMsg *message.Mes
 	}
 
 	//Service data
-	regACKMsgMap := make(map[string]interface{})
+	registerAckMsg := &RegisterAckMsg{}
+
 	if result == RegisterSuccess {
-		regACKMsgMap["status"] = 0
+		registerAckMsg.Status = 0
 	} else {
-		regACKMsgMap["status"] = 1
+		registerAckMsg.Status = 1
 	}
 
-	regACKMsgMap["callbacknumber"] = callbackNum
-	regACKMsgMap["bid"] = bid
+	registerAckMsg.CallbackNum = callbackNum
+	registerAckMsg.Bid = bid
 
-	serviceData, err := json.Marshal(regACKMsgMap)
+	serviceData, err := json.Marshal(registerAckMsg)
 	if err != nil {
 		logger.Error(err)
 		return err
@@ -234,6 +251,37 @@ func (re *Register) RegisterACK(conn message.MessageConn, regReqMsg *message.Mes
 		logger.Error(err)
 		return err
 	}
+
+	logger.Info(re.registerReqData.ThingId, "Register success!")
+
+	err = re.testgrpc()
+	if err != nil {
+		logger.Error("GRPC ERROR!")
+		return err
+	}
+
+	return nil
+}
+
+func (re *Register) testgrpc() error {
+	conn, err := grpc.Dial("localhost:50051", grpc.WithInsecure())
+	if err != nil {
+		logger.Error("did not connect:", err)
+		return err
+	}
+	defer conn.Close()
+
+	c := pb.NewAdderClient(conn)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	r, err := c.Add(ctx, &pb.AddRequest{Addparameter1: 12, Addparameter2: 13})
+	if err != nil {
+		logger.Error(err)
+		return err
+	}
+
+	logger.Info("GRPG RETURN:", r.Sum)
 
 	return nil
 }

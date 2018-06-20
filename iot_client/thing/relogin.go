@@ -22,7 +22,6 @@ const (
 const (
 	ReLoginStop = iota
 	ReLoginReqStatus
-	/*ReLoginAckStatus*/
 )
 
 type ReLogin struct {
@@ -44,15 +43,16 @@ func (relogin *ReLogin) ReLoginReq(thing *Thing, reqMsg *message.Message) error 
 
 	relogin.reloginStatus = ReLoginReqStatus
 
-	if thing.ThingStatus != ThingRegisteredLogined {
+	/*   if thing.ThingStatus != ThingRegisteredLogined {
 		logger.Error("Not login or register")
 		return errors.New("Not login or register")
-	}
+	}*/
 
 	reLoginReqServData := &ReLoginReqServData{}
 	err := json.Unmarshal(reqMsg.ServData, reLoginReqServData)
 	if err != nil {
 		logger.Error(err)
+		relogin.reloginStatus = ReLoginStop
 		return err
 	}
 
@@ -68,7 +68,7 @@ func (relogin *ReLogin) ReLoginReq(thing *Thing, reqMsg *message.Message) error 
 		logger.Debug("Start timer......")
 		select {
 		case <-relogin.reloginTimer.C:
-			logger.Info("Timer coming, need relogin!")
+			logger.Info("Timer coming, need login again!")
 			thing.PushEventChannel(EventLoginRequest, nil)
 		case <-relogin.closeReloginTimer:
 			logger.Debug("Close relogin timer!")
@@ -100,12 +100,14 @@ func (relogin *ReLogin) ReLoginAck(thing *Thing, reqMsg *message.Message) error 
 	aesKey, err := thing.GetAesKey()
 	if err != nil {
 		logger.Error(err)
+		relogin.reloginStatus = ReLoginStop
 		return err
 	}
 
 	encryptServData, err := msg.EncryptServiceData(message.Encrypt_AES128, aesKey, serviceData)
 	if err != nil {
 		logger.Error(err)
+		relogin.reloginStatus = ReLoginStop
 		return err
 	}
 
@@ -124,6 +126,7 @@ func (relogin *ReLogin) ReLoginAck(thing *Thing, reqMsg *message.Message) error 
 	dispatchData, err := util.StructToByteSlice(dd)
 	if err != nil {
 		logger.Error(err)
+		relogin.reloginStatus = ReLoginStop
 		return err
 	}
 
@@ -139,6 +142,7 @@ func (relogin *ReLogin) ReLoginAck(thing *Thing, reqMsg *message.Message) error 
 	messageHeaderData, err := util.StructToByteSlice(mh)
 	if err != nil {
 		logger.Error(err)
+		relogin.reloginStatus = ReLoginStop
 		return err
 	}
 
@@ -146,6 +150,7 @@ func (relogin *ReLogin) ReLoginAck(thing *Thing, reqMsg *message.Message) error 
 	err = msg.SendMessage(messageHeaderData, dispatchData, encryptServData)
 	if err != nil {
 		logger.Error(err)
+		relogin.reloginStatus = ReLoginStop
 		return err
 	}
 
